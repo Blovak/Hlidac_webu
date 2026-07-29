@@ -1,1 +1,226 @@
+<!doctype html>
+<html lang="cs">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="description" content="Hlídání změn internetových stránek s upozorněním e-mailem.">
+    <meta name="theme-color" content="#0f172a">
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'self'; script-src 'self' https://script.google.com https://script.googleusercontent.com https://*.googleusercontent.com; style-src 'self'; img-src 'self' data:; connect-src 'none'; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'; upgrade-insecure-requests"
+    >
+    <title>Hlídání webu</title>
+    <link rel="stylesheet" href="styles.css">
+  </head>
+  <body>
+    <div class="ambient ambient-one" aria-hidden="true"></div>
+    <div class="ambient ambient-two" aria-hidden="true"></div>
 
+    <header class="site-header">
+      <a class="brand" href="./" aria-label="Hlídání webu – úvod">
+        <span class="brand-mark" aria-hidden="true">
+          <svg viewBox="0 0 32 32" role="img">
+            <path d="M16 4.5c-6.1 0-11 5.1-13 11.5 2 6.4 6.9 11.5 13 11.5S27 22.4 29 16C27 9.6 22.1 4.5 16 4.5Z"></path>
+            <circle cx="16" cy="16" r="5.25"></circle>
+          </svg>
+        </span>
+        <span>Hlídání webu</span>
+      </a>
+      <div id="accountBar" class="account-bar" hidden>
+        <span id="accountEmail" class="account-email"></span>
+        <button id="logoutButton" class="button button-ghost button-small" type="button">Odhlásit</button>
+      </div>
+    </header>
+
+    <main>
+      <section id="authView" class="auth-layout" aria-labelledby="heroTitle">
+        <div class="hero-copy">
+          <span class="eyebrow">Váš osobní hlídač změn</span>
+          <h1 id="heroTitle">Zjistěte, když se stránka opravdu změní.</h1>
+          <p class="hero-lead">
+            Vložte adresy stránek, nastavte rytmus kontroly a změnu dostanete
+            rovnou do e-mailu. Bez instalace a bez dalšího účtu.
+          </p>
+          <div class="benefits" aria-label="Výhody">
+            <div class="benefit">
+              <span class="benefit-number">01</span>
+              <div>
+                <strong>Pravidelné kontroly</strong>
+                <span>V hodinách, dnech nebo týdnech.</span>
+              </div>
+            </div>
+            <div class="benefit">
+              <span class="benefit-number">02</span>
+              <div>
+                <strong>Upozornění e-mailem</strong>
+                <span>S přímým odkazem na změněnou stránku.</span>
+              </div>
+            </div>
+            <div class="benefit">
+              <span class="benefit-number">03</span>
+              <div>
+                <strong>Data ve vašem Google Sheetu</strong>
+                <span>Přehledně a odděleně pro každého uživatele.</span>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="auth-card">
+          <div id="emailStep">
+            <span class="card-kicker">Přihlášení</span>
+            <h2>Začněte svým e-mailem</h2>
+            <p>Pošleme vám šestimístný ověřovací kód.</p>
+            <form id="emailForm" novalidate>
+              <label for="emailInput">E-mailová adresa</label>
+              <input id="emailInput" name="email" type="email" autocomplete="email" placeholder="jmeno@example.cz" required>
+              <button class="button button-primary button-full" type="submit">
+                <span>Poslat ověřovací kód</span>
+              </button>
+            </form>
+          </div>
+
+          <div id="codeStep" hidden>
+            <button id="backToEmail" class="text-button" type="button">← Změnit e-mail</button>
+            <span class="card-kicker">Ověření</span>
+            <h2>Zkontrolujte schránku</h2>
+            <p>Kód jsme poslali na <strong id="verificationEmail"></strong>. Platí 10 minut.</p>
+            <form id="codeForm" novalidate>
+              <label for="codeInput">Šestimístný kód</label>
+              <input
+                id="codeInput"
+                class="code-input"
+                name="code"
+                type="text"
+                inputmode="numeric"
+                autocomplete="one-time-code"
+                pattern="[0-9]{6}"
+                maxlength="6"
+                placeholder="000000"
+                required
+              >
+              <button class="button button-primary button-full" type="submit">Ověřit a pokračovat</button>
+            </form>
+            <button id="resendCode" class="text-button resend-button" type="button">Poslat nový kód</button>
+          </div>
+
+          <p id="authMessage" class="form-message" role="status" aria-live="polite"></p>
+          <p class="privacy-note">Kód slouží pouze k ověření, že e-mail patří vám.</p>
+        </div>
+      </section>
+
+      <section id="dashboardView" class="dashboard" hidden aria-labelledby="dashboardTitle">
+        <div class="dashboard-heading">
+          <div>
+            <span class="eyebrow">Přehled sledování</span>
+            <h1 id="dashboardTitle">Vaše hlídané stránky</h1>
+            <p>Kontroly probíhají automaticky. První kontrola vytvoří výchozí stav stránky.</p>
+          </div>
+          <button id="openAddForm" class="button button-primary" type="button">
+            <span aria-hidden="true">＋</span> Přidat stránku
+          </button>
+        </div>
+
+        <div id="summaryCards" class="summary-grid">
+          <article class="summary-card">
+            <span>Aktivní hlídání</span>
+            <strong id="activeCount">0</strong>
+          </article>
+          <article class="summary-card">
+            <span>Zachycené změny</span>
+            <strong id="changeCount">0</strong>
+          </article>
+          <article class="summary-card summary-card-wide">
+            <span>Nejbližší kontrola</span>
+            <strong id="nextCheck">—</strong>
+          </article>
+        </div>
+
+        <div class="list-panel">
+          <div class="list-panel-heading">
+            <h2>Sledované adresy</h2>
+            <button id="refreshButton" class="button button-ghost button-small" type="button">Obnovit</button>
+          </div>
+          <div id="loadingState" class="empty-state" hidden>
+            <span class="spinner" aria-hidden="true"></span>
+            <p>Načítám vaše stránky…</p>
+          </div>
+          <div id="emptyState" class="empty-state" hidden>
+            <span class="empty-icon" aria-hidden="true">◎</span>
+            <h3>Zatím nic nehlídáte</h3>
+            <p>Přidejte první stránku a my vytvoříme její výchozí stav.</p>
+            <button id="emptyAddButton" class="button button-secondary" type="button">Přidat první stránku</button>
+          </div>
+          <div id="urlList" class="url-list"></div>
+          <p id="dashboardMessage" class="form-message panel-message" role="status" aria-live="polite"></p>
+        </div>
+      </section>
+    </main>
+
+    <dialog id="urlDialog" class="dialog">
+      <form id="urlForm" method="dialog" novalidate>
+        <div class="dialog-heading">
+          <div>
+            <span class="card-kicker">Nastavení kontroly</span>
+            <h2 id="dialogTitle">Přidat stránku</h2>
+          </div>
+          <button id="closeDialog" class="icon-button" type="button" aria-label="Zavřít">×</button>
+        </div>
+        <input id="urlId" type="hidden">
+        <label for="urlInput">Adresa stránky</label>
+        <input id="urlInput" type="url" inputmode="url" placeholder="https://example.cz/novinky" required>
+        <div class="interval-fields">
+          <div>
+            <label for="intervalValue">Kontrolovat každé</label>
+            <input id="intervalValue" type="number" min="1" max="8760" value="1" required>
+          </div>
+          <div>
+            <label for="intervalUnit">Jednotka</label>
+            <select id="intervalUnit">
+              <option value="hours">hodiny</option>
+              <option value="days">dny</option>
+              <option value="weeks">týdny</option>
+            </select>
+          </div>
+        </div>
+        <label class="switch-row" for="activeInput">
+          <span>
+            <strong>Hlídání je aktivní</strong>
+            <small>Neaktivní záznam zůstane uložený, ale nebude se kontrolovat.</small>
+          </span>
+          <input id="activeInput" type="checkbox" checked>
+          <span class="switch" aria-hidden="true"></span>
+        </label>
+        <p id="dialogMessage" class="form-message" role="status" aria-live="polite"></p>
+        <div class="dialog-actions">
+          <button id="cancelDialog" class="button button-ghost" type="button">Zrušit</button>
+          <button id="saveUrlButton" class="button button-primary" type="submit">Uložit stránku</button>
+        </div>
+      </form>
+    </dialog>
+
+    <template id="urlCardTemplate">
+      <article class="url-card">
+        <div class="url-status" aria-hidden="true"></div>
+        <div class="url-main">
+          <div class="url-title-row">
+            <a class="url-link" target="_blank" rel="noopener noreferrer"></a>
+            <span class="status-badge"></span>
+          </div>
+          <div class="url-meta">
+            <span class="interval-label"></span>
+            <span class="last-check-label"></span>
+            <span class="change-label"></span>
+          </div>
+          <p class="url-error" hidden></p>
+        </div>
+        <div class="url-actions">
+          <button class="icon-button edit-button" type="button" aria-label="Upravit stránku">✎</button>
+          <button class="icon-button delete-button" type="button" aria-label="Odstranit stránku">×</button>
+        </div>
+      </article>
+    </template>
+
+    <script src="app.js" defer></script>
+  </body>
+</html>
