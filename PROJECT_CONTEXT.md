@@ -1,6 +1,6 @@
 # Kontext projektu Hlídání webu
 
-Aktualizováno: 29. července 2026
+Aktualizováno: 22. srpna 2026
 
 Tento soubor je hlavní předávací dokument pro pokračování vývoje a provozu
 projektu. Neobsahuje hesla, OAuth tokeny ani jiné tajné údaje.
@@ -32,7 +32,7 @@ název odpovídá normalizované e-mailové adrese uživatele.
 | Apps Script ID | `1mIJ4ELptyEkdeVOog7WFlrgpzt5kNOXawyPLkc1LuWDhSLM1kuCjBZI4` |
 | Produkční deployment | `AKfycbw8_ns2VSvPq_zNJXgfBdl-k3X-6EZIy0FuhB4EVpwyza1byyc8GzDnTEm4ZXuyH5By0A` |
 | Apps Script endpoint | https://script.google.com/macros/s/AKfycbw8_ns2VSvPq_zNJXgfBdl-k3X-6EZIy0FuhB4EVpwyza1byyc8GzDnTEm4ZXuyH5By0A/exec |
-| Aktuální verze deploymentu | `4` |
+| Aktuální verze deploymentu | `5` |
 
 ## Ověřený provozní stav
 
@@ -146,6 +146,7 @@ Každý uživatelský list má tyto sloupce:
 11. `LastChange`
 12. `CreatedAt`
 13. `LastError`
+14. `LastContent`
 
 Podporované jednotky jsou `hours`, `days` a `weeks`. Nejkratší interval je
 jedna hodina.
@@ -153,8 +154,13 @@ jedna hodina.
 ## Detekce změn
 
 - První úspěšná kontrola vytvoří výchozí SHA-256 otisk a neposílá upozornění.
-- U textových odpovědí se před výpočtem hashe odstraní HTML komentáře, skripty,
-  styly a nadbytečné mezery.
+- U HTML odpovědí se před výpočtem hashe ponechá normalizovaný viditelný text.
+  Ignorují se komentáře, hlavička dokumentu, skripty, styly, šablony, SVG,
+  přímo skryté prvky, značky a atributy HTML i rozdíly v bílých znacích.
+- Omezený textový snímek se ukládá do `LastContent`. Při změně se z něj určí
+  okolní text a ukázky odebraného a přidaného obsahu pro e-mail.
+- Starší listy se automaticky rozšíří o `LastContent`; první kontrola po migraci
+  pouze vytvoří nový výchozí stav a neposílá upozornění.
 - U netextových odpovědí se počítá hash bajtového obsahu.
 - Při rozdílném hashi odešle `MailApp` e-mail s přímým odkazem.
 - Stav HTTP mimo rozsah 200–399 se uloží jako chyba.

@@ -10,6 +10,8 @@ const CONFIG = Object.freeze({
   sessionTtlDays: 30,
   maxChecksPerRun: 50,
   maxRuntimeMs: 4.5 * 60 * 1000,
+  maxSnapshotChars: 45000,
+  maxDiffPartChars: 700,
   userSheetHeaders: [
     "ID",
     "URL",
@@ -24,6 +26,7 @@ const CONFIG = Object.freeze({
     "LastChange",
     "CreatedAt",
     "LastError",
+    "LastContent",
   ],
   usersSheetName: "_Users",
   usersHeaders: ["Email", "TokenHash", "TokenExpiresAt", "VerifiedAt", "CreatedAt"],
@@ -76,6 +79,7 @@ function setupProject() {
   lock.waitLock(30000);
   try {
     ensureSystemSetup_();
+    migrateUserSheets_();
     ensureHourlyTrigger_();
   } finally {
     lock.releaseLock();
@@ -211,6 +215,7 @@ function addUrl_(email, parameters) {
       "",
       now,
       "",
+      "",
     ]);
     return { id: id };
   } finally {
@@ -245,6 +250,7 @@ function updateUrl_(email, parameters) {
       urlChanged ? "" : existing[10],
       existing[11] || now,
       "",
+      urlChanged ? "" : existing[13],
     ]]);
     return { updated: true };
   } finally {
@@ -300,6 +306,7 @@ function checkAllSites() {
       if (checked >= CONFIG.maxChecksPerRun || Date.now() - startedAt > CONFIG.maxRuntimeMs) break;
       const sheet = sheets[sheetIndex];
       if (!looksLikeUserSheet_(sheet)) continue;
+      ensureUserSheetSchema_(sheet);
       const email = sheet.getName();
       const lastRow = sheet.getLastRow();
       if (lastRow < 2) continue;
@@ -328,6 +335,7 @@ function checkOneSite_(sheet, rowNumber, row, email, now) {
   let status = "";
   let lastChange = row[10] || "";
   let errorMessage = "";
+  let storedContent = String(row[13] || "");
 
   try {
     assertSafePublicUrl_(url);
@@ -345,17 +353,20 @@ function checkOneSite_(sheet, rowNumber, row, email, now) {
       throw new Error("HTTP " + status);
     }
 
-    const newHash = responseHash_(response);
-    if (hash && hash !== newHash) {
-      sendChangeNotification_(email, url, now);
+    const contentState = responseContentState_(response);
+    const isLegacyBaseline = Boolean(hash && !storedContent);
+    if (hash && hash !== contentState.hash && !isLegacyBaseline) {
+      const change = describeContentChange_(storedContent, contentState.storedContent);
+      sendChangeNotification_(email, url, now, change);
       lastChange = now;
     }
-    hash = newHash;
+    hash = contentState.hash;
+    storedContent = contentState.storedContent;
   } catch (error) {
     errorMessage = truncate_(String(error && error.message ? error.message : error), 350);
   }
 
-  sheet.getRange(rowNumber, 7, 1, 7).setValues([[
+  sheet.getRange(rowNumber, 7, 1, 8).setValues([[
     now,
     nextCheck,
     hash,
@@ -363,16 +374,19 @@ function checkOneSite_(sheet, rowNumber, row, email, now) {
     lastChange,
     row[11] || now,
     errorMessage,
+    storedContent,
   ]]);
 }
 
-function sendChangeNotification_(email, url, changedAt) {
+function sendChangeNotification_(email, url, changedAt, change) {
   const safeUrl = escapeHtml_(url);
   const formattedDate = Utilities.formatDate(
     changedAt,
     Session.getScriptTimeZone() || "Europe/Prague",
     "d. M. yyyy HH:mm"
   );
+  const plainDetails = formatPlainChangeDetails_(change);
+  const htmlDetails = formatHtmlChangeDetails_(change);
   MailApp.sendEmail({
     to: email,
     subject: "Změna stránky: " + truncate_(url, 90),
@@ -380,12 +394,14 @@ function sendChangeNotification_(email, url, changedAt) {
       "Na sledované stránce byla zachycena změna.\n\n" +
       url + "\n\n" +
       "Zachyceno: " + formattedDate + "\n\n" +
+      plainDetails +
       "Správa sledování: " + CONFIG.frontendUrl,
     htmlBody:
       '<div style="font-family:Arial,sans-serif;max-width:560px;margin:auto;padding:28px">' +
       '<p style="color:#2563eb;font-size:12px;font-weight:bold;letter-spacing:1.5px;text-transform:uppercase">Hlídání webu</p>' +
       '<h1 style="color:#0f172a;font-size:25px">Na stránce se něco změnilo</h1>' +
       '<p style="color:#475569;line-height:1.6">Změnu jsme zachytili ' + escapeHtml_(formattedDate) + ".</p>" +
+      htmlDetails +
       '<p><a href="' + safeUrl + '" style="display:inline-block;padding:13px 20px;border-radius:10px;background:#0f172a;color:white;font-weight:bold;text-decoration:none">Otevřít změněnou stránku</a></p>' +
       '<p style="margin-top:24px;color:#64748b;font-size:12px;word-break:break-all">' + safeUrl + "</p>" +
       "</div>",
@@ -428,8 +444,8 @@ function ensureUserSheet_(email) {
     sheet.setColumnWidth(2, 380);
     sheet.getRange("G:H").setNumberFormat("dd.MM.yyyy HH:mm");
     sheet.getRange("K:L").setNumberFormat("dd.MM.yyyy HH:mm");
-  } else if (!looksLikeUserSheet_(sheet)) {
-    throw apiError_("SHEET_CONFLICT", "List s názvem tohoto e-mailu již existuje, ale nemá očekávanou strukturu.");
+  } else {
+    ensureUserSheetSchema_(sheet);
   }
   return sheet;
 }
@@ -442,10 +458,34 @@ function styleHeader_(sheet, columnCount) {
 }
 
 function looksLikeUserSheet_(sheet) {
-  if (sheet.getLastColumn() < CONFIG.userSheetHeaders.length || sheet.getLastRow() < 1) return false;
-  const headers = sheet.getRange(1, 1, 1, CONFIG.userSheetHeaders.length).getValues()[0];
-  return CONFIG.userSheetHeaders.every(function (header, index) {
+  const legacyColumnCount = CONFIG.userSheetHeaders.length - 1;
+  if (sheet.getLastColumn() < legacyColumnCount || sheet.getLastRow() < 1) return false;
+  const headers = sheet.getRange(1, 1, 1, legacyColumnCount).getValues()[0];
+  return CONFIG.userSheetHeaders.slice(0, legacyColumnCount).every(function (header, index) {
     return headers[index] === header;
+  });
+}
+
+function ensureUserSheetSchema_(sheet) {
+  if (!looksLikeUserSheet_(sheet)) {
+    throw apiError_("SHEET_CONFLICT", "List s názvem tohoto e-mailu již existuje, ale nemá očekávanou strukturu.");
+  }
+  const lastColumn = CONFIG.userSheetHeaders.length;
+  const currentHeader = sheet.getRange(1, lastColumn).getValue();
+  if (currentHeader && currentHeader !== CONFIG.userSheetHeaders[lastColumn - 1]) {
+    throw apiError_("SHEET_CONFLICT", "List obsahuje neočekávaný sloupec v místě interního snímku obsahu.");
+  }
+  if (!currentHeader) {
+    sheet.getRange(1, lastColumn).setValue(CONFIG.userSheetHeaders[lastColumn - 1]);
+    styleHeader_(sheet, lastColumn);
+  }
+}
+
+function migrateUserSheets_() {
+  getSpreadsheet_().getSheets().forEach(function (sheet) {
+    if (sheet.getName().charAt(0) !== "_" && looksLikeUserSheet_(sheet)) {
+      ensureUserSheetSchema_(sheet);
+    }
   });
 }
 
@@ -537,29 +577,139 @@ function assertSafePublicUrl_(url) {
   }
 }
 
-function responseHash_(response) {
+function responseContentState_(response) {
   const headers = response.getAllHeaders();
   const contentType = String(headers["Content-Type"] || headers["content-type"] || "").toLowerCase();
-  let content;
-  if (contentType.indexOf("text/") !== -1 || contentType.indexOf("html") !== -1 || contentType.indexOf("json") !== -1) {
-    content = normalizeTextContent_(response.getContentText());
-  } else {
-    content = response.getBlob().getBytes();
+  const isHtml = contentType.indexOf("html") !== -1;
+  const isText = contentType.indexOf("text/") !== -1 || contentType.indexOf("json") !== -1;
+  if (isHtml || isText) {
+    const content = isHtml
+      ? normalizeVisibleHtmlText_(response.getContentText())
+      : normalizePlainText_(response.getContentText());
+    return {
+      hash: sha256_(content),
+      storedContent: "text\n" + truncateSnapshot_(content),
+    };
   }
-  const digest = Utilities.computeDigest(Utilities.DigestAlgorithm.SHA_256, content);
-  return digest.map(function (byte) {
+  const digest = Utilities.computeDigest(
+    Utilities.DigestAlgorithm.SHA_256,
+    response.getBlob().getBytes()
+  );
+  return {
+    hash: bytesToHex_(digest),
+    storedContent: "binary\n",
+  };
+}
+
+function bytesToHex_(bytes) {
+  return bytes.map(function (byte) {
     const value = byte < 0 ? byte + 256 : byte;
     return ("0" + value.toString(16)).slice(-2);
   }).join("");
 }
 
-function normalizeTextContent_(content) {
+function normalizeVisibleHtmlText_(content) {
+  return normalizePlainText_(String(content)
+    .replace(/<!--[\s\S]*?-->/g, " ")
+    .replace(/<([a-z][a-z0-9:-]*)\b[^>]*(?:\shidden(?:\s*=\s*(?:"hidden"|'hidden'|hidden))?|\saria-hidden\s*=\s*(?:"true"|'true'|true))[^>]*>[\s\S]*?<\/\1\s*>/gi, " ")
+    .replace(/<([a-z][a-z0-9:-]*)\b[^>]*\sstyle\s*=\s*(?:"[^"]*(?:display\s*:\s*none|visibility\s*:\s*hidden)[^"]*"|'[^']*(?:display\s*:\s*none|visibility\s*:\s*hidden)[^']*')[^>]*>[\s\S]*?<\/\1\s*>/gi, " ")
+    .replace(/<(script|style|template|noscript|svg|canvas|iframe)\b[^>]*>[\s\S]*?<\/\1\s*>/gi, " ")
+    .replace(/<head\b[^>]*>[\s\S]*?<\/head\s*>/gi, " ")
+    .replace(/<(br|hr)\b[^>]*>/gi, "\n")
+    .replace(/<\/(address|article|aside|blockquote|dd|div|dl|dt|fieldset|figcaption|figure|footer|form|h[1-6]|header|li|main|nav|ol|p|pre|section|table|tbody|td|tfoot|th|thead|tr|ul)>/gi, "\n")
+    .replace(/<[^>]+>/g, " ")
+    .replace(/&#(\d+);/g, function (_match, decimal) {
+      return safeCodePoint_(Number(decimal));
+    })
+    .replace(/&#x([0-9a-f]+);/gi, function (_match, hexadecimal) {
+      return safeCodePoint_(parseInt(hexadecimal, 16));
+    })
+    .replace(/&(nbsp|amp|lt|gt|quot|apos|ndash|mdash|hellip);/gi, function (_match, name) {
+      const entities = {
+        nbsp: " ", amp: "&", lt: "<", gt: ">", quot: '"', apos: "'",
+        ndash: "–", mdash: "—", hellip: "…",
+      };
+      return entities[name.toLowerCase()];
+    }));
+}
+
+function safeCodePoint_(value) {
+  if (!Number.isFinite(value) || value < 0 || value > 0x10FFFF) return " ";
+  try {
+    return String.fromCodePoint(value);
+  } catch (_error) {
+    return " ";
+  }
+}
+
+function normalizePlainText_(content) {
   return String(content)
-    .replace(/<!--[\s\S]*?-->/g, "")
-    .replace(/<script\b[^>]*>[\s\S]*?<\/script>/gi, "")
-    .replace(/<style\b[^>]*>[\s\S]*?<\/style>/gi, "")
-    .replace(/\s+/g, " ")
+    .replace(/\r\n?/g, "\n")
+    .split("\n")
+    .map(function (line) { return line.replace(/\s+/g, " ").trim(); })
+    .filter(Boolean)
+    .join("\n")
     .trim();
+}
+
+function truncateSnapshot_(content) {
+  const text = String(content || "");
+  if (text.length <= CONFIG.maxSnapshotChars) return text;
+  const half = Math.floor((CONFIG.maxSnapshotChars - 20) / 2);
+  return text.slice(0, half) + "\n[… zkráceno …]\n" + text.slice(-half);
+}
+
+function describeContentChange_(oldStoredContent, newStoredContent) {
+  if (oldStoredContent.indexOf("text\n") !== 0 || newStoredContent.indexOf("text\n") !== 0) {
+    return null;
+  }
+  const oldWords = oldStoredContent.slice(5).split(/\s+/).filter(Boolean);
+  const newWords = newStoredContent.slice(5).split(/\s+/).filter(Boolean);
+  let prefix = 0;
+  while (prefix < oldWords.length && prefix < newWords.length && oldWords[prefix] === newWords[prefix]) {
+    prefix += 1;
+  }
+  let suffix = 0;
+  while (
+    suffix < oldWords.length - prefix &&
+    suffix < newWords.length - prefix &&
+    oldWords[oldWords.length - 1 - suffix] === newWords[newWords.length - 1 - suffix]
+  ) {
+    suffix += 1;
+  }
+  const before = oldWords.slice(Math.max(0, prefix - 12), prefix).join(" ");
+  const afterStart = newWords.length - suffix;
+  const after = newWords.slice(afterStart, Math.min(newWords.length, afterStart + 12)).join(" ");
+  const change = {
+    context: truncate_([before, after].filter(Boolean).join(" … "), CONFIG.maxDiffPartChars),
+    removed: truncate_(oldWords.slice(prefix, oldWords.length - suffix).join(" "), CONFIG.maxDiffPartChars),
+    added: truncate_(newWords.slice(prefix, newWords.length - suffix).join(" "), CONFIG.maxDiffPartChars),
+  };
+  return change.context || change.removed || change.added ? change : null;
+}
+
+function formatPlainChangeDetails_(change) {
+  if (!change) {
+    return "Změna se týká obsahu, u kterého nelze vytvořit textovou ukázku.\n\n";
+  }
+  return "Pravděpodobné místo změny:\n" +
+    (change.context ? "Okolí: " + change.context + "\n" : "") +
+    (change.removed ? "Odebráno: " + change.removed + "\n" : "") +
+    (change.added ? "Přidáno: " + change.added + "\n" : "") + "\n";
+}
+
+function formatHtmlChangeDetails_(change) {
+  if (!change) {
+    return '<p style="color:#475569;line-height:1.6">U tohoto typu obsahu nelze vytvořit textovou ukázku změny.</p>';
+  }
+  const rows = [];
+  if (change.context) rows.push("<strong>Okolí:</strong> " + escapeHtml_(change.context));
+  if (change.removed) rows.push('<strong style="color:#b91c1c">Odebráno:</strong> ' + escapeHtml_(change.removed));
+  if (change.added) rows.push('<strong style="color:#047857">Přidáno:</strong> ' + escapeHtml_(change.added));
+  return '<div style="margin:20px 0;padding:16px;border-radius:10px;background:#f8fafc;color:#334155;line-height:1.6">' +
+    '<p style="margin:0 0 8px;font-weight:bold">Pravděpodobné místo změny</p>' +
+    rows.map(function (row) { return '<p style="margin:5px 0">' + row + "</p>"; }).join("") +
+    "</div>";
 }
 
 function rowToUrlObject_(row) {

@@ -93,13 +93,19 @@ List každého uživatele se jmenuje přesně jeho normalizovaným e-mailem a ob
 | LastChange | Poslední zachycená změna |
 | CreatedAt | Datum vytvoření |
 | LastError | Poslední chyba kontroly |
+| LastContent | Interní snímek normalizovaného viditelného textu pro popis změny |
 
 ## Provozní poznámky
 
 - Nejkratší podporovaný interval je jedna hodina, což odpovídá možnostem
   časových triggerů Apps Scriptu.
-- První úspěšná kontrola pouze uloží výchozí otisk; e-mail se odešle až při
-  následující změně.
+- U HTML se porovnává normalizovaný viditelný text. Skripty, styly, metadata,
+  komentáře, prvky přímo označené jako skryté, značky a atributy HTML se
+  ignorují, takže jejich technické změny samy o sobě upozornění nevyvolají.
+- První úspěšná kontrola pouze uloží výchozí otisk a textový snímek; e-mail se
+  odešle až při následující změně. Totéž platí pro první kontrolu po přechodu
+  ze starší metodiky.
+- Upozornění obsahuje okolní text a ukázku odebraného a přidaného obsahu.
 - Kvůli omezení běhu Apps Scriptu se v jednom spuštění kontroluje nejvýše 50
   stránek. Další splatné kontroly se zpracují při příštím hodinovém běhu.
 - Stránky závislé na JavaScriptu mohou vracet pouze základní HTML. Aplikace
