@@ -25,7 +25,7 @@ název odpovídá normalizované e-mailové adrese uživatele.
 | GitHub repozitář | https://github.com/Blovak/Hlidac_webu |
 | Webová aplikace | https://blovak.github.io/Hlidac_webu/ |
 | Větev | `main` |
-| Commit aplikační implementace | `647f7739766cdea31ee998eeb19af604ef440ed3` |
+| Commit aplikační implementace | `cf95d4404de0c4570891a0cef80c5bef8e7dfb81` |
 | Google Sheet | https://docs.google.com/spreadsheets/d/1Zfjx1yZ0DRI0G3LAkdRN1LWY227VV_yD6FIeMtNMQDo/edit |
 | Spreadsheet ID | `1Zfjx1yZ0DRI0G3LAkdRN1LWY227VV_yD6FIeMtNMQDo` |
 | Apps Script projekt | https://script.google.com/d/1mIJ4ELptyEkdeVOog7WFlrgpzt5kNOXawyPLkc1LuWDhSLM1kuCjBZI4/edit |
@@ -36,16 +36,20 @@ název odpovídá normalizované e-mailové adrese uživatele.
 
 ## Ověřený provozní stav
 
-K 29. červenci 2026 bylo ověřeno:
+K 22. srpnu 2026 bylo ověřeno:
 
 - GitHub Pages workflow doběhl úspěšně.
 - Produkční URL vrací aktuální `index.html` aplikace.
 - Apps Script endpoint veřejně odpovídá na akci `ping`.
+- Produkční Apps Script deployment běží ve verzi `5` s metodikou porovnání
+  viditelného textu a popisem místa změny.
 - Funkce `setupProject` byla vlastníkem spuštěna a oprávnění byla potvrzena.
 - V Google Sheetu existuje skrytý systémový list `_Users`.
 - Funkce `setupProject` zakládá hodinový trigger `checkAllSites`.
 - Frontend prošel kontrolou JavaScriptové syntaxe a vizuální kontrolou na
   desktopovém i mobilním viewportu.
+- Backend prošel kontrolou syntaxe a modelovými testy, které ověřily ignorování
+  technických změn HTML, migraci bez falešného upozornění a textový popis změny.
 
 ## Architektura
 
@@ -169,6 +173,17 @@ jedna hodina.
 
 JavaScriptově vykreslované weby se porovnávají podle serverové odpovědi, nikoli
 podle DOM vykresleného v prohlížeči.
+
+### Poslední změna metodiky (22. srpna 2026)
+
+Commit `cf95d4404de0c4570891a0cef80c5bef8e7dfb81` nahradil porovnávání téměř
+celého HTML porovnáváním normalizovaného viditelného textu. Produkční backend
+byl nasazen jako verze `5` s popisem `Viditelný text a popis místa změny`.
+GitHub Pages workflow pro tento commit doběhl úspěšně.
+
+Při další práci je důležité zachovat migrační chování: pokud záznam obsahuje
+starý `LastHash`, ale ještě nemá `LastContent`, první úspěšná kontrola pouze
+uloží nový výchozí stav. Upozornění se odešle až při další skutečné změně.
 
 ## Bezpečnost
 
